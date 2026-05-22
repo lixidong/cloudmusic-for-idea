@@ -20,6 +20,13 @@
         ]]></description>
 
     <change-notes><![CDATA[
+        <h3>1.1.0</h3>
+        <ul>
+          <li>新增：进度条支持拖动 seek</li>
+          <li>新增：心动模式自动续——队列剩 3 首时后台拉下一批 20 首追加</li>
+          <li>优化：Like / Dislike 按钮改用自定义红心 SVG（空心 / 红色填充 / 心碎）</li>
+          <li>重构：Kotlin 源码包名由 org.example.musicplugin → org.lixidong.musicplugin</li>
+        </ul>
         <h3>1.0.0</h3>
         <ul>
           <li>初版发布</li>
@@ -39,16 +46,16 @@
 
     <extensions defaultExtensionNs="com.intellij">
         <toolWindow id="CloudMusic"
-                    factoryClass="org.example.musicplugin.ui.toolwindow.MusicToolWindowFactory"
+                    factoryClass="org.lixidong.musicplugin.ui.toolwindow.MusicToolWindowFactory"
                     anchor="bottom"
                     icon="AllIcons.Nodes.PpLib"/>
 
         <statusBarWidgetFactory id="CloudMusicWidget"
-                                implementation="org.example.musicplugin.ui.statusbar.MusicStatusBarWidgetFactory"
+                                implementation="org.lixidong.musicplugin.ui.statusbar.MusicStatusBarWidgetFactory"
                                 order="first"/>
 
         <applicationConfigurable parentId="tools"
-                                 instance="org.example.musicplugin.settings.MusicConfigurable"
+                                 instance="org.lixidong.musicplugin.settings.MusicConfigurable"
                                  id="com.lixidong.cloudmusic.settings"
                                  displayName="CloudMusic"/>
 
@@ -58,22 +65,22 @@
     <actions>
         <group id="CloudMusic.MainGroup" text="CloudMusic" popup="true">
             <action id="CloudMusic.PlayPause"
-                    class="org.example.musicplugin.action.PlayPauseAction"
+                    class="org.lixidong.musicplugin.action.PlayPauseAction"
                     text="Play / Pause"/>
             <action id="CloudMusic.Next"
-                    class="org.example.musicplugin.action.NextTrackAction"
+                    class="org.lixidong.musicplugin.action.NextTrackAction"
                     text="Next Track"/>
             <action id="CloudMusic.Prev"
-                    class="org.example.musicplugin.action.PrevTrackAction"
+                    class="org.lixidong.musicplugin.action.PrevTrackAction"
                     text="Previous Track"/>
             <action id="CloudMusic.VolumeUp"
-                    class="org.example.musicplugin.action.VolumeUpAction"
+                    class="org.lixidong.musicplugin.action.VolumeUpAction"
                     text="Volume Up"/>
             <action id="CloudMusic.VolumeDown"
-                    class="org.example.musicplugin.action.VolumeDownAction"
+                    class="org.lixidong.musicplugin.action.VolumeDownAction"
                     text="Volume Down"/>
             <action id="CloudMusic.Login"
-                    class="org.example.musicplugin.action.LoginAction"
+                    class="org.lixidong.musicplugin.action.LoginAction"
                     text="Login to CloudMusic"/>
             <add-to-group group-id="ToolsMenu" anchor="last"/>
         </group>

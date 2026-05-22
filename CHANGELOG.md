@@ -4,6 +4,18 @@
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-05-22
+
+### Added
+
+- 进度条支持鼠标拖动 seek
+- 心动模式自动续：队列剩 3 首时后台拉下一批 20 首追加到尾部
+
+### Changed
+
+- Like / Dislike 按钮改用自定义 SVG 红心图标（空心 / 红色填充 / 心碎）
+- Kotlin 源码包名重构：`org.example.musicplugin` → `org.lixidong.musicplugin`
+
 ## [1.0.0] - 2026-05-22
 
 ### Added
