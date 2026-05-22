@@ -1,0 +1,34 @@
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# IntelliJ IDEA project files
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# IntelliJ Platform sandbox (created by runIde — may hold credentials in on-disk PasswordSafe)
+.intellijPlatform/
+
+# Compiled / generated
+out/
+
+# Logs
+*.log
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Editor
+*.swp
+*.swo
+*~
+
+# Local Gradle / Kotlin overrides
+local.properties
+
+# Claude Code local state
+.claude/

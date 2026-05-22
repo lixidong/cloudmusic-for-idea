@@ -1,0 +1,81 @@
+<idea-plugin>
+    <id>com.lixidong.cloudmusic</id>
+    <name>CloudMusic for IDEA</name>
+    <vendor url="https://github.com/lixidong">木乄木</vendor>
+
+    <description><![CDATA[
+        <p>在 IntelliJ IDEA 中收听云音乐的非官方控制器。</p>
+
+        <h3>主要特性</h3>
+        <ul>
+          <li>底部状态栏：滚动歌名 / 歌词文案 + 上一首 / 播放 / 下一首 / 队列 / 心动模式 / 喜欢 / 不喜欢 / 音量</li>
+          <li>底部工具窗：扫码 / 账号密码 / 短信验证码 三种登录方式；完整播放器视图（歌单 / 封面 / 进度 / 歌词）</li>
+          <li>流式 MP3 播放，非播放时零开销；播放时 CPU 占用约 3-5%</li>
+          <li>喜欢 / 不喜欢 / 心动模式 与账号实时同步</li>
+        </ul>
+
+        <p>项目主页与源代码：<a href="https://github.com/lixidong">github.com/lixidong</a></p>
+
+        <p><b>免责声明：</b>本插件仅供学习交流。所调用的第三方网络音乐服务接口与版权均归原始服务商所有，本插件与任何音乐服务商均无关联。使用风险由用户自负。</p>
+        ]]></description>
+
+    <change-notes><![CDATA[
+        <h3>1.0.0</h3>
+        <ul>
+          <li>初版发布</li>
+          <li>支持扫码 / 手机号+密码 / 手机号+短信 三种登录</li>
+          <li>StatusBar 控制条：滚动歌词文案 + 8 个控件按钮（可垂直居中、避开 IME 浮窗）</li>
+          <li>ToolWindow 完整播放器：歌单浏览 / 封面 / 进度 / 歌词</li>
+          <li>心动模式（一次性生成 20 首心动列表）</li>
+          <li>喜欢 / 不喜欢按钮同步到账号</li>
+        </ul>
+        ]]></change-notes>
+
+    <idea-version since-build="261" until-build="271.*"/>
+
+    <depends>com.intellij.modules.platform</depends>
+
+    <resource-bundle>messages.MusicBundle</resource-bundle>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <toolWindow id="CloudMusic"
+                    factoryClass="org.example.musicplugin.ui.toolwindow.MusicToolWindowFactory"
+                    anchor="bottom"
+                    icon="AllIcons.Nodes.PpLib"/>
+
+        <statusBarWidgetFactory id="CloudMusicWidget"
+                                implementation="org.example.musicplugin.ui.statusbar.MusicStatusBarWidgetFactory"
+                                order="first"/>
+
+        <applicationConfigurable parentId="tools"
+                                 instance="org.example.musicplugin.settings.MusicConfigurable"
+                                 id="com.lixidong.cloudmusic.settings"
+                                 displayName="CloudMusic"/>
+
+        <notificationGroup id="CloudMusic.Notifications" displayType="BALLOON"/>
+    </extensions>
+
+    <actions>
+        <group id="CloudMusic.MainGroup" text="CloudMusic" popup="true">
+            <action id="CloudMusic.PlayPause"
+                    class="org.example.musicplugin.action.PlayPauseAction"
+                    text="Play / Pause"/>
+            <action id="CloudMusic.Next"
+                    class="org.example.musicplugin.action.NextTrackAction"
+                    text="Next Track"/>
+            <action id="CloudMusic.Prev"
+                    class="org.example.musicplugin.action.PrevTrackAction"
+                    text="Previous Track"/>
+            <action id="CloudMusic.VolumeUp"
+                    class="org.example.musicplugin.action.VolumeUpAction"
+                    text="Volume Up"/>
+            <action id="CloudMusic.VolumeDown"
+                    class="org.example.musicplugin.action.VolumeDownAction"
+                    text="Volume Down"/>
+            <action id="CloudMusic.Login"
+                    class="org.example.musicplugin.action.LoginAction"
+                    text="Login to CloudMusic"/>
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </group>
+    </actions>
+</idea-plugin>
