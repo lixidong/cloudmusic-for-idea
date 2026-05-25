@@ -68,6 +68,21 @@ internal class LyricService(private val cs: CoroutineScope) {
     fun currentLineFor(positionMs: Long): String? {
         val list = currentLines
         if (list.isEmpty()) return null
+        val idx = currentIndexFor(positionMs)
+        if (idx < 0) return null
+        return list[idx].text.ifBlank { null }
+    }
+
+    /** All loaded lyric lines for the currently-loaded song, in time order. */
+    fun lines(): List<LyricLine> = currentLines
+
+    /** Song id whose lyrics are currently in [lines]; -1 if none loaded. */
+    fun loadedSongId(): Long = loadedSongId
+
+    /** Index of the current line for [positionMs], or -1 if no line is active yet. */
+    fun currentIndexFor(positionMs: Long): Int {
+        val list = currentLines
+        if (list.isEmpty()) return -1
         var lo = 0
         var hi = list.size - 1
         var found = -1
@@ -80,8 +95,7 @@ internal class LyricService(private val cs: CoroutineScope) {
                 hi = mid - 1
             }
         }
-        if (found < 0) return null
-        return list[found].text.ifBlank { null }
+        return found
     }
 
     fun clear() {

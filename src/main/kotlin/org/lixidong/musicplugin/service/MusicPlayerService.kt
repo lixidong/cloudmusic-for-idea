@@ -33,6 +33,8 @@ internal class MusicPlayerService(private val cs: CoroutineScope) : Disposable {
     private val likedSongIds: MutableSet<Long> = newKeySet()
     @Volatile private var likedLoaded = false
     @Volatile private var heartReplenishInProgress = false
+    @Volatile private var isPersonalFmMode = false
+    @Volatile private var fmReplenishInProgress = false
 
     init {
         val saved = MusicSettings.getInstance().state.volumePercent.coerceIn(0, 100)
@@ -48,6 +50,7 @@ internal class MusicPlayerService(private val cs: CoroutineScope) : Disposable {
 
     fun loadPlaylist(songs: List<Song>, startIndex: Int = 0, autoPlay: Boolean = false, playlistId: Long = 0L) {
         queue.replaceAll(songs, startIndex)
+        isPersonalFmMode = false
         update(
             state.copy(
                 queue = songs,
@@ -58,6 +61,22 @@ internal class MusicPlayerService(private val cs: CoroutineScope) : Disposable {
             )
         )
         if (autoPlay) play(queue.current())
+    }
+
+    /** Load songs into the queue as Personal FM — auto-extend when queue runs low. */
+    fun loadPersonalFm(songs: List<Song>) {
+        queue.replaceAll(songs, 0)
+        isPersonalFmMode = true
+        update(
+            state.copy(
+                queue = songs,
+                currentIndex = queue.currentIndex(),
+                currentSong = queue.current(),
+                currentPlaylistId = 0L,
+                isHeartMode = false
+            )
+        )
+        play(queue.current())
     }
 
     /** Play the n-th song in the current queue without changing playlistId or heart mode. */
@@ -105,8 +124,8 @@ internal class MusicPlayerService(private val cs: CoroutineScope) : Disposable {
         update(state.copy(volumePercent = v))
     }
 
-    fun volumeUp() = setVolume(state.volumePercent + 10)
-    fun volumeDown() = setVolume(state.volumePercent - 10)
+    fun volumeUp() = setVolume(state.volumePercent + MusicSettings.getInstance().state.volumeStep)
+    fun volumeDown() = setVolume(state.volumePercent - MusicSettings.getInstance().state.volumeStep)
 
     /** Seek the current song to an absolute position. Snaps to bounds; no-op if nothing playing. */
     fun seekTo(positionMs: Long) {
@@ -251,6 +270,7 @@ internal class MusicPlayerService(private val cs: CoroutineScope) : Disposable {
     private fun play(song: Song?) {
         if (song == null) return
         if (!likedLoaded) refreshLikedSongs()
+        RecentPlayStore.getInstance().record(song)
         cs.launch(Dispatchers.IO) {
             try {
                 val url = api.fetchSongUrl(song.id)
@@ -260,7 +280,7 @@ internal class MusicPlayerService(private val cs: CoroutineScope) : Disposable {
                     return@launch
                 }
                 ApplicationManager.getApplication().invokeLater {
-                    engine.play(url)
+                    engine.play(url, song.id)
                     LyricService.getInstance().loadFor(song.id)
                     update(
                         state.copy(
@@ -274,12 +294,40 @@ internal class MusicPlayerService(private val cs: CoroutineScope) : Disposable {
                         )
                     )
                     maybeReplenishHeartMode()
+                    maybeReplenishPersonalFm()
                 }
             } catch (e: NeteaseApiException) {
                 log.warn("fetch url failed: ${e.message}", e)
                 ApplicationManager.getApplication().invokeLater { next() }
             } catch (e: Throwable) {
                 log.warn("play failed", e)
+            }
+        }
+    }
+
+    private fun maybeReplenishPersonalFm() {
+        if (!isPersonalFmMode) return
+        if (fmReplenishInProgress) return
+        val remaining = state.queue.size - state.currentIndex - 1
+        if (remaining > 2) return
+        fmReplenishInProgress = true
+        cs.launch(Dispatchers.IO) {
+            try {
+                val more = try { api.fetchPersonalFmSongs() } catch (e: Throwable) {
+                    log.warn("personal-fm replenish failed", e); emptyList()
+                }
+                if (more.isNotEmpty()) {
+                    ApplicationManager.getApplication().invokeLater {
+                        val existingIds = queue.snapshot().map { it.id }.toHashSet()
+                        val fresh = more.filter { it.id !in existingIds }
+                        if (fresh.isNotEmpty()) {
+                            queue.appendAll(fresh)
+                            update(state.copy(queue = queue.snapshot()))
+                        }
+                    }
+                }
+            } finally {
+                fmReplenishInProgress = false
             }
         }
     }
@@ -319,6 +367,14 @@ internal class MusicPlayerService(private val cs: CoroutineScope) : Disposable {
         override fun onError(error: Throwable) {
             log.warn("playback engine error", error)
             update(state.copy(isPlaying = false))
+        }
+
+        override fun onStalled() {
+            log.warn("playback stalled — auto-advancing to next track")
+            ApplicationManager.getApplication().invokeLater {
+                notify("播放卡住,自动切下一首", NotificationType.WARNING)
+                next()
+            }
         }
     }
 

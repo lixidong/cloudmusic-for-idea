@@ -299,6 +299,77 @@ internal class NeteaseApiClient private constructor() {
         if (parsed.code != 200) return emptyList()
         return parsed.data.orEmpty().mapNotNull { it.songInfo?.toDomain() }
     }
+
+    // ---------- Search ----------
+
+    /** type: 1 song / 10 album / 100 artist / 1000 playlist */
+    fun search(keyword: String, type: Int, limit: Int = 30, offset: Int = 0): SearchResults {
+        if (keyword.isBlank()) return SearchResults(emptyList(), emptyList(), emptyList(), emptyList())
+        val body = weapi(
+            NeteaseEndpoints.SEARCH,
+            mapOf("s" to keyword, "type" to type, "limit" to limit, "offset" to offset, "total" to true)
+        )
+        val parsed = gson.fromJson(body, SearchResp::class.java)
+        if (parsed.code != 200 || parsed.result == null) {
+            return SearchResults(emptyList(), emptyList(), emptyList(), emptyList())
+        }
+        val r = parsed.result
+        return SearchResults(
+            songs = r.songs.orEmpty().map { it.toDomain() },
+            playlists = r.playlists.orEmpty().map {
+                PlaylistSummary(it.id, it.name ?: "", it.coverImgUrl, it.trackCount ?: 0)
+            },
+            artists = r.artists.orEmpty().map {
+                ArtistSummary(it.id, it.name ?: "", it.picUrl)
+            },
+            albums = r.albums.orEmpty().map {
+                AlbumSummary(it.id, it.name ?: "", it.artist?.name ?: "", it.picUrl)
+            }
+        )
+    }
+
+    // ---------- Recommend / Personal FM ----------
+
+    fun fetchDailyRecommendSongs(): List<Song> {
+        val body = weapi(NeteaseEndpoints.RECOMMEND_SONGS, emptyMap())
+        val parsed = gson.fromJson(body, RecommendSongsResp::class.java)
+        if (parsed.code != 200) return emptyList()
+        return parsed.data?.dailySongs.orEmpty().map { it.toDomain() }
+    }
+
+    fun fetchPersonalFmSongs(): List<Song> {
+        val body = weapi(NeteaseEndpoints.PERSONAL_FM, emptyMap())
+        val parsed = gson.fromJson(body, PersonalFmResp::class.java)
+        if (parsed.code != 200) return emptyList()
+        return parsed.data.orEmpty().map { it.toDomain() }
+    }
+
+    // ---------- Artist / Album expansion ----------
+
+    fun fetchArtistTopSongs(artistId: Long): List<Song> {
+        val body = weapi("${NeteaseEndpoints.ARTIST_TOP_SONGS}/$artistId", emptyMap())
+        val parsed = gson.fromJson(body, ArtistDetailResp::class.java)
+        if (parsed.code != 200) return emptyList()
+        return parsed.hotSongs.orEmpty().map { it.toDomain() }
+    }
+
+    fun fetchAlbumSongs(albumId: Long): List<Song> {
+        val body = weapi("${NeteaseEndpoints.ALBUM_DETAIL}/$albumId", emptyMap())
+        val parsed = gson.fromJson(body, AlbumDetailResp::class.java)
+        if (parsed.code != 200) return emptyList()
+        return parsed.songs.orEmpty().map { it.toDomain() }
+    }
+
+    /** Batch-fetch song detail for a list of song ids (used by "我喜欢的音乐" inflation). */
+    fun fetchSongDetails(songIds: Collection<Long>): List<Song> {
+        if (songIds.isEmpty()) return emptyList()
+        val cArr = songIds.joinToString(",", prefix = "[", postfix = "]") { """{"id":$it}""" }
+        val idArr = songIds.joinToString(",", prefix = "[", postfix = "]")
+        val body = weapi(NeteaseEndpoints.SONG_DETAIL, mapOf("c" to cArr, "ids" to idArr))
+        val parsed = gson.fromJson(body, SongDetailResp::class.java)
+        if (parsed.code != 200) return emptyList()
+        return parsed.songs.orEmpty().map { it.toDomain() }
+    }
 }
 
 private fun ProfileInfo?.toDomain(): UserProfile {

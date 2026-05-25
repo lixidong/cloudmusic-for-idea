@@ -16,6 +16,8 @@ import java.awt.BorderLayout
 import java.awt.Component
 import java.awt.Dimension
 import java.awt.FlowLayout
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
 import javax.swing.BoxLayout
 import javax.swing.JButton
 import javax.swing.JComponent
@@ -39,6 +41,7 @@ internal class PlayerView : JBPanel<JBPanel<*>>(), PlaybackStateListener {
     }
     private val lyricLabel = JBLabel(" ").apply {
         alignmentX = Component.CENTER_ALIGNMENT
+        font = font.deriveFont(mapOf(java.awt.font.TextAttribute.TRACKING to 0.06))
     }
     private val progressSlider = JSlider(0, 1000, 0)
     private val timeLabel = JBLabel("00:00 / 00:00")
@@ -72,16 +75,27 @@ internal class PlayerView : JBPanel<JBPanel<*>>(), PlaybackStateListener {
             if (ignoreSliderChange) return@addChangeListener
             MusicPlayerService.getInstance().setVolume(volumeSlider.value)
         }
+        // Drag-preview: while the thumb is being moved, update timeLabel + lyric to reflect
+        // the dragged position. The actual seek is committed on mouseReleased — we can't
+        // rely on valueIsAdjusting=false firing a change event under all LookAndFeels.
         progressSlider.addChangeListener {
-            // Only commit when the user finishes the drag, and ignore programmatic updates.
             if (ignoreProgressChange) return@addChangeListener
-            if (progressSlider.valueIsAdjusting) return@addChangeListener
-            val service = MusicPlayerService.getInstance()
-            val duration = service.currentState().durationMs
+            if (!progressSlider.valueIsAdjusting) return@addChangeListener
+            val duration = MusicPlayerService.getInstance().currentState().durationMs
             if (duration <= 0) return@addChangeListener
-            val targetMs = duration * progressSlider.value / 1000
-            service.seekTo(targetMs)
+            val previewMs = duration * progressSlider.value / 1000
+            timeLabel.text = "${fmt(previewMs)} / ${fmt(duration)}"
+            lyricLabel.text = LyricService.getInstance().currentLineFor(previewMs) ?: " "
         }
+        progressSlider.addMouseListener(object : MouseAdapter() {
+            override fun mouseReleased(e: MouseEvent) {
+                val service = MusicPlayerService.getInstance()
+                val duration = service.currentState().durationMs
+                if (duration <= 0) return
+                val targetMs = duration * progressSlider.value / 1000
+                service.seekTo(targetMs)
+            }
+        })
     }
 
     private fun buildCenter(): JComponent {
@@ -159,6 +173,9 @@ internal class PlayerView : JBPanel<JBPanel<*>>(), PlaybackStateListener {
                 if (currentAlbumUrl == song?.albumPicUrl) albumLabel.icon = icon
             }
         }
+        // Don't fight the user's drag: while the thumb is being moved, drag-preview
+        // owns the slider / time / lyric labels. Resume programmatic updates only
+        // after the drag ends.
         if (!progressSlider.valueIsAdjusting) {
             val targetValue =
                 if (state.durationMs > 0) ((state.positionMs.coerceAtLeast(0) * 1000L) / state.durationMs).toInt().coerceIn(0, 1000)
@@ -167,14 +184,14 @@ internal class PlayerView : JBPanel<JBPanel<*>>(), PlaybackStateListener {
                 ignoreProgressChange = true
                 try { progressSlider.value = targetValue } finally { ignoreProgressChange = false }
             }
+            timeLabel.text = "${fmt(state.positionMs)} / ${fmt(state.durationMs)}"
+            lyricLabel.text = LyricService.getInstance().currentLineFor(state.positionMs) ?: " "
         }
-        timeLabel.text = "${fmt(state.positionMs)} / ${fmt(state.durationMs)}"
         playPauseButton.icon = if (state.isPlaying) MusicIcons.Pause else MusicIcons.Play
         if (volumeSlider.value != state.volumePercent) {
             ignoreSliderChange = true
             try { volumeSlider.value = state.volumePercent } finally { ignoreSliderChange = false }
         }
-        lyricLabel.text = LyricService.getInstance().currentLineFor(state.positionMs) ?: " "
     }
 
     private fun fmt(ms: Long): String {

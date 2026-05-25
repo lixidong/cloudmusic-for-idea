@@ -2,9 +2,11 @@ package org.lixidong.musicplugin.ui.statusbar
 
 import com.intellij.util.ui.JBUI
 import java.awt.Dimension
+import java.awt.Font
 import java.awt.Graphics
 import java.awt.Graphics2D
 import java.awt.RenderingHints
+import java.awt.font.TextAttribute
 import javax.swing.JComponent
 import javax.swing.Timer
 import javax.swing.UIManager
@@ -20,6 +22,7 @@ internal class ScrollingLyricLabel(initialWidth: Int = 220) : JComponent() {
     private var text: String = ""
     private var scrollPos: Int = 0
     private var isPlaying: Boolean = false
+    private var trackedFont: Font = baseFont()
 
     private val timer = Timer(40) {
         scrollPos += 1
@@ -29,12 +32,23 @@ internal class ScrollingLyricLabel(initialWidth: Int = 220) : JComponent() {
     }.apply { initialDelay = 0; isRepeats = true }
 
     init {
-        font = UIManager.getFont("Label.font") ?: font
+        font = baseFont()
+        trackedFont = applyTracking(font)
         isOpaque = false
         preferredSize = Dimension(JBUI.scale(initialWidth), JBUI.scale(18))
         minimumSize = Dimension(JBUI.scale(60), JBUI.scale(16))
         border = JBUI.Borders.empty(0, 4)
     }
+
+    override fun setFont(f: Font?) {
+        super.setFont(f)
+        if (f != null) trackedFont = applyTracking(f)
+    }
+
+    private fun baseFont(): Font = UIManager.getFont("Label.font") ?: font
+
+    private fun applyTracking(f: Font): Font =
+        f.deriveFont(mapOf(TextAttribute.TRACKING to 0.1))
 
     fun setFixedWidth(widthPx: Int) {
         val w = JBUI.scale(widthPx.coerceIn(80, 600))
@@ -56,7 +70,7 @@ internal class ScrollingLyricLabel(initialWidth: Int = 220) : JComponent() {
 
     private fun textWidth(): Int {
         if (text.isEmpty()) return 0
-        val fm = getFontMetrics(font) ?: return 0
+        val fm = getFontMetrics(trackedFont) ?: return 0
         return fm.stringWidth(text)
     }
 
@@ -82,7 +96,7 @@ internal class ScrollingLyricLabel(initialWidth: Int = 220) : JComponent() {
         try {
             g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON)
             g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
-            g2.font = font
+            g2.font = trackedFont
             g2.color = foreground ?: UIManager.getColor("Label.foreground")
             g2.clipRect(0, 0, width, height)
             val fm = g2.fontMetrics

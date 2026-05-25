@@ -18,6 +18,8 @@ internal class MusicConfigurable : Configurable {
 
     private var enableStatusBar: Boolean = settings.state.enableStatusBar
     private var statusBarWidth: Int = settings.state.statusBarTextWidth
+    private var volumeStep: Int = settings.state.volumeStep
+    private var cacheLimitMb: Int = settings.state.cacheLimitMb
 
     private var dialogPanel: com.intellij.openapi.ui.DialogPanel? = null
 
@@ -26,6 +28,8 @@ internal class MusicConfigurable : Configurable {
     override fun createComponent(): JComponent {
         enableStatusBar = settings.state.enableStatusBar
         statusBarWidth = settings.state.statusBarTextWidth
+        volumeStep = settings.state.volumeStep
+        cacheLimitMb = settings.state.cacheLimitMb
 
         val panel = panel {
             group("Account") {
@@ -50,6 +54,24 @@ internal class MusicConfigurable : Configurable {
                 }
             }
 
+            group("Playback") {
+                row("音量步进 (%)") {
+                    intTextField(1..50).bindIntText(this@MusicConfigurable::volumeStep)
+                }
+            }
+
+            group("Cache") {
+                row("本地缓存上限 (MB)") {
+                    intTextField(0..4096).bindIntText(this@MusicConfigurable::cacheLimitMb)
+                        .comment("0 表示禁用本地缓存。修改后下次播放生效。")
+                }
+                row {
+                    button("清空缓存") {
+                        org.lixidong.musicplugin.audio.MediaCache.getInstance().clear()
+                    }
+                }
+            }
+
             row {
                 button(MusicBundle.message("settings.clearCache")) { auth.logout() }
             }
@@ -64,6 +86,9 @@ internal class MusicConfigurable : Configurable {
         dialogPanel?.apply()
         settings.state.enableStatusBar = enableStatusBar
         settings.state.statusBarTextWidth = statusBarWidth
+        settings.state.volumeStep = volumeStep.coerceIn(1, 50)
+        settings.state.cacheLimitMb = cacheLimitMb.coerceIn(0, 4096)
+        org.lixidong.musicplugin.audio.MediaCache.getInstance().updateLimit(settings.state.cacheLimitMb)
         ProjectManager.getInstance().openProjects.forEach { project ->
             try {
                 project.getService(StatusBarWidgetsManager::class.java)
@@ -77,6 +102,8 @@ internal class MusicConfigurable : Configurable {
     override fun reset() {
         enableStatusBar = settings.state.enableStatusBar
         statusBarWidth = settings.state.statusBarTextWidth
+        volumeStep = settings.state.volumeStep
+        cacheLimitMb = settings.state.cacheLimitMb
         dialogPanel?.reset()
     }
 

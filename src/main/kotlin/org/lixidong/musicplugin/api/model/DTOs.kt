@@ -67,3 +67,47 @@ internal data class LikedListResp(val code: Int, val ids: List<Long>?)
 
 internal data class HeartModeResp(val code: Int, val data: List<HeartSongDto>?)
 internal data class HeartSongDto(val songInfo: TrackDto?)
+
+internal data class SearchResp(val code: Int, val result: SearchResultDto?)
+internal data class SearchResultDto(
+    val songs: List<TrackDto>?,
+    val songCount: Int?,
+    val playlists: List<SearchPlaylistDto>?,
+    val playlistCount: Int?,
+    val artists: List<SearchArtistDto>?,
+    val artistCount: Int?,
+    val albums: List<SearchAlbumDto>?,
+    val albumCount: Int?
+)
+internal data class SearchPlaylistDto(
+    val id: Long,
+    val name: String?,
+    val coverImgUrl: String?,
+    val trackCount: Int?
+)
+internal data class SearchArtistDto(val id: Long, val name: String?, val picUrl: String?)
+internal data class SearchAlbumDto(
+    val id: Long,
+    val name: String?,
+    val picUrl: String?,
+    val artist: ArtistDto?
+)
+
+internal data class PersonalFmResp(val code: Int, val data: List<TrackDto>?)
+
+internal data class RecommendSongsResp(val code: Int, val data: RecommendSongsDataDto?)
+internal data class RecommendSongsDataDto(val dailySongs: List<TrackDto>?)
+
+internal data class ArtistDetailResp(
+    val code: Int,
+    val artist: SearchArtistDto?,
+    val hotSongs: List<TrackDto>?
+)
+
+internal data class AlbumDetailResp(
+    val code: Int,
+    val album: SearchAlbumDto?,
+    val songs: List<TrackDto>?
+)
+
+internal data class SongDetailResp(val code: Int, val songs: List<TrackDto>?)

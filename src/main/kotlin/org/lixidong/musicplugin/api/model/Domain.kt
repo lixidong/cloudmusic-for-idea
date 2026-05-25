@@ -25,3 +25,19 @@ data class UserProfile(
 )
 
 data class LyricLine(val timeMs: Long, val text: String)
+
+data class ArtistSummary(val id: Long, val name: String, val picUrl: String?)
+
+data class AlbumSummary(
+    val id: Long,
+    val name: String,
+    val artistName: String,
+    val picUrl: String?
+)
+
+data class SearchResults(
+    val songs: List<Song>,
+    val playlists: List<PlaylistSummary>,
+    val artists: List<ArtistSummary>,
+    val albums: List<AlbumSummary>
+)

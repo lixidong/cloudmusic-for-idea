@@ -13,11 +13,13 @@ internal class MusicSettings : PersistentStateComponent<MusicSettings.Data> {
 
     data class Data(
         var volumePercent: Int = 60,
+        var volumeStep: Int = 10,
         var loopMode: String = "LIST",
         var lastPlaylistId: Long = 0L,
         var enableStatusBar: Boolean = true,
         var statusBarTextWidth: Int = 220,
-        var username: String = ""
+        var username: String = "",
+        var cacheLimitMb: Int = 256
     )
 
     private var data = Data()

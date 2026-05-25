@@ -17,6 +17,13 @@ internal object NeteaseEndpoints {
     const val FM_TRASH = "/weapi/radio/trash/add"
     const val HEART_MODE = "/weapi/playmode/intelligence/list"
 
+    const val SEARCH = "/weapi/cloudsearch/get/web"
+    const val PERSONAL_FM = "/weapi/v1/radio/get"
+    const val RECOMMEND_SONGS = "/weapi/v3/discovery/recommend/songs"
+    const val ARTIST_TOP_SONGS = "/weapi/v1/artist"   // append `/{id}`
+    const val ALBUM_DETAIL = "/weapi/v1/album"        // append `/{id}`
+    const val SONG_DETAIL = "/weapi/v3/song/detail"
+
     const val QR_LOGIN_PAGE_PREFIX = "https://music.163.com/login?codekey="
 
     const val REFERER = "https://music.163.com"

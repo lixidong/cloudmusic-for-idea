@@ -49,10 +49,8 @@ cd cloudmusic-for-idea
 
 ## 已知限制
 
-- 进度条目前只读，不支持拖动 seek
-- 心动模式一次拉 20 首，播完不自动续
 - 部分需要会员的歌曲无法播放，会自动跳过
-- Like / Dislike 按钮的图标是借用 IDE 内置图标（红心 SVG 计划后续替换）
+- seek 大幅向后跳转时会重新打开音频流（NetEase tokenised URL 不支持 HTTP Range）
 
 ## 鸣谢
 

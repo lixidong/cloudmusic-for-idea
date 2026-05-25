@@ -4,6 +4,30 @@
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-05-25
+
+### Added
+
+- 搜索：支持歌曲 / 歌单 / 歌手 / 专辑
+- 快捷入口：最近播放、我喜欢的音乐、每日推荐、私人 FM
+- 本地缓存：MP3 LRU 磁盘缓存（默认 256 MB，可在 Settings 调整）
+- 设置：音量步进可配置
+
+### Changed
+
+- 随机播放（SHUFFLE）改进：使用 Random，引入"最近播放集合"避免短期内重复
+- 播放缓冲扩容：BufferedInputStream 64KB → 256KB；SourceDataLine 缓冲 64KB → 192KB；MediaCache 写文件加 BufferedOutputStream，明显减少卡顿
+- 工具窗歌词：拖动进度条时实时预览对应位置歌词；歌词字间距加宽
+- 状态栏歌词字间距进一步加宽
+- AudioEngine 静默 catch 改为 log.debug，便于排查问题
+
+### Fixed
+
+- 拖动进度条无效：JSlider 在部分 LookAndFeel 下 drag-release 不触发 change event，改用 mouseReleased 兜底
+- sdl.write 偶发 IllegalArgumentException：mp3spi 在缓冲边界可能返回非整 frame 字节数，写入前对齐到 frameSize，残留搬到下次缓冲
+- 播放卡住自动恢复：网络流静默断流(socket 不发 FIN)导致 read 永久阻塞时，超过 12 秒无进度自动切下一首并提示用户
+- README 已知限制中过期内容（seek、心动模式自动续、SVG 红心图标）
+
 ## [1.1.0] - 2026-05-22
 
 ### Added
