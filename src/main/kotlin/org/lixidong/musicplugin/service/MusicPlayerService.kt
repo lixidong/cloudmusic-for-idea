@@ -186,12 +186,9 @@ internal class MusicPlayerService(private val cs: CoroutineScope) : Disposable {
             return
         }
         val seed = state.currentSong ?: run { notifyEmptyQueue(); return }
-        val playlistId = state.currentPlaylistId
-        if (playlistId <= 0L) {
-            notify("请先从某个歌单里播放一首歌再开启心动模式", NotificationType.WARNING)
-            return
-        }
         cs.launch(Dispatchers.IO) {
+            // playlistId 只是网易云接口的必填上下文,核心依据是种子歌曲;无上下文歌单时兜底到用户首个歌单
+            val playlistId = resolveHeartModePlaylistId()
             val songs = try {
                 api.fetchHeartModeSongs(seed.id, playlistId, 20)
             } catch (e: Throwable) {
@@ -217,6 +214,16 @@ internal class MusicPlayerService(private val cs: CoroutineScope) : Disposable {
                 notify("心动模式已开启（共 ${newQueue.size} 首）", NotificationType.INFORMATION)
             }
         }
+    }
+
+    private fun resolveHeartModePlaylistId(): Long {
+        val current = state.currentPlaylistId
+        if (current > 0L) return current
+        val remembered = MusicSettings.getInstance().state.lastPlaylistId
+        if (remembered > 0L) return remembered
+        val uid = NeteaseAuthService.getInstance().currentProfile?.userId ?: return 0L
+        return runCatching { api.fetchUserPlaylists(uid, limit = 1).firstOrNull()?.id ?: 0L }
+            .getOrElse { log.warn("resolve heart-mode playlist failed", it); 0L }
     }
 
     /** When in heart mode and the upcoming queue is short, fetch the next batch in the background. */
