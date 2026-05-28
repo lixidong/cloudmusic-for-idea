@@ -95,6 +95,7 @@ internal class MusicStatusBarWidget(private val project: Project) : CustomStatus
         // 8 inline buttons (~22px each) + 7 gaps of 7px + outer paddings + lyric area
         val w = MusicSettings.getInstance().state.statusBarTextWidth + 8 * 22 + 7 * 7 + 32
         panel.preferredSize = Dimension(JBUI.scale(w), JBUI.scale(26))
+
     }
 
     override fun ID(): String = "NeteaseMusicWidget"
@@ -126,6 +127,9 @@ internal class MusicStatusBarWidget(private val project: Project) : CustomStatus
         playPauseButton.setIcon(if (state.isPlaying) MusicIcons.Pause else MusicIcons.Play)
         likeButton.setIcon(if (state.isCurrentLiked) MusicIcons.LikeOn else MusicIcons.LikeOff)
         heartModeButton.setIcon(if (state.isHeartMode) MusicIcons.HeartModeOn else MusicIcons.HeartModeOff)
+        // 更新歌词区域tooltip（只在歌词标签上，不影响按钮区域）
+        val song = state.currentSong
+        lyricLabel.toolTipText = song?.display ?: ""
     }
 
     private fun computeText(state: PlaybackState): String {
