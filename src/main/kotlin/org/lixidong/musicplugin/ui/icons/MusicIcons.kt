@@ -20,4 +20,5 @@ internal object MusicIcons {
     @JvmField val Dislike: Icon = IconLoader.getIcon("/icons/heart_broken.svg", MusicIcons::class.java)
     @JvmField val HeartModeOff: Icon = AllIcons.Actions.IntentionBulb
     @JvmField val HeartModeOn: Icon = AllIcons.General.InspectionsOK
+    @JvmField val Loading: Icon = AllIcons.Actions.ForceRefresh
 }

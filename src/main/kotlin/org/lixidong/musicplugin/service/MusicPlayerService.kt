@@ -17,6 +17,9 @@ import org.lixidong.musicplugin.api.model.Song
 import org.lixidong.musicplugin.audio.AudioEngine
 import org.lixidong.musicplugin.audio.LoopMode
 import org.lixidong.musicplugin.audio.PlaybackQueue
+import org.lixidong.musicplugin.audio.PrebufferManager
+import org.lixidong.musicplugin.audio.RecoveryController
+import org.lixidong.musicplugin.audio.StreamDownloader
 import org.lixidong.musicplugin.auth.NeteaseAuthService
 import org.lixidong.musicplugin.settings.MusicSettings
 import java.util.concurrent.ConcurrentHashMap.newKeySet
@@ -28,6 +31,9 @@ internal class MusicPlayerService(private val cs: CoroutineScope) : Disposable {
     private val api = NeteaseApiClient.getInstance()
     private val engine = AudioEngine()
     private val queue = PlaybackQueue()
+    private val streamDownloader = StreamDownloader()
+    private val prebufferManager = PrebufferManager()
+    private lateinit var recoveryController: RecoveryController
 
     @Volatile private var state = PlaybackState()
     private val likedSongIds: MutableSet<Long> = newKeySet()
@@ -40,6 +46,16 @@ internal class MusicPlayerService(private val cs: CoroutineScope) : Disposable {
         val saved = MusicSettings.getInstance().state.volumePercent.coerceIn(0, 100)
         engine.setVolume(saved)
         state = state.copy(volumePercent = saved)
+        recoveryController = RecoveryController(
+            engine = engine,
+            fetchNewUrl = { songId -> api.fetchSongUrl(songId) },
+            onRecoveryExhausted = {
+                ApplicationManager.getApplication().invokeLater {
+                    notify("当前歌曲连接异常, 已跳过", NotificationType.WARNING)
+                    next()
+                }
+            }
+        )
         engine.setListener(EngineListener())
         runCatching {
             queue.loopMode = LoopMode.valueOf(MusicSettings.getInstance().state.loopMode)
@@ -96,11 +112,11 @@ internal class MusicPlayerService(private val cs: CoroutineScope) : Disposable {
         }
         if (state.isPlaying) {
             engine.pause()
-            update(state.copy(isPlaying = false))
+            update(state.copy(playbackPhase = PlaybackPhase.PAUSED))
         } else {
             if (engine.isActive()) {
                 engine.resume()
-                update(state.copy(isPlaying = true))
+                update(state.copy(playbackPhase = PlaybackPhase.PLAYING))
             } else {
                 play(current)
             }
@@ -133,7 +149,7 @@ internal class MusicPlayerService(private val cs: CoroutineScope) : Disposable {
         val duration = if (current.durationMs > 0) current.durationMs else state.durationMs
         val target = positionMs.coerceIn(0L, (duration - 500).coerceAtLeast(0L))
         engine.seekTo(target)
-        update(state.copy(positionMs = target, isPlaying = true))
+        update(state.copy(positionMs = target, playbackPhase = PlaybackPhase.PLAYING))
     }
 
     fun setLoopMode(mode: LoopMode) {
@@ -278,6 +294,18 @@ internal class MusicPlayerService(private val cs: CoroutineScope) : Disposable {
         if (song == null) return
         if (!likedLoaded) refreshLikedSongs()
         RecentPlayStore.getInstance().record(song)
+        recoveryController.reset()
+        // 先设置 BUFFERING 状态，显示缓冲指示器
+        update(state.copy(
+            currentSong = song,
+            playbackPhase = PlaybackPhase.BUFFERING,
+            isBuffering = true,
+            positionMs = 0,
+            durationMs = song.durationMs,
+            currentIndex = queue.currentIndex(),
+            queue = queue.snapshot(),
+            isCurrentLiked = song.id in likedSongIds
+        ))
         cs.launch(Dispatchers.IO) {
             try {
                 val url = api.fetchSongUrl(song.id)
@@ -286,13 +314,16 @@ internal class MusicPlayerService(private val cs: CoroutineScope) : Disposable {
                     ApplicationManager.getApplication().invokeLater { next() }
                     return@launch
                 }
+                // 预缓冲：下载前 512KB 后开始播放，后台继续下载
+                val prebufferResult = prebufferManager.prebuffer(song.id, url)
                 ApplicationManager.getApplication().invokeLater {
-                    engine.play(url, song.id)
+                    engine.playFromStream(song.id, prebufferResult.stream)
                     LyricService.getInstance().loadFor(song.id)
                     update(
                         state.copy(
                             currentSong = song,
-                            isPlaying = true,
+                            playbackPhase = PlaybackPhase.PLAYING,
+                            isBuffering = false,
                             positionMs = 0,
                             durationMs = song.durationMs,
                             currentIndex = queue.currentIndex(),
@@ -308,6 +339,12 @@ internal class MusicPlayerService(private val cs: CoroutineScope) : Disposable {
                 ApplicationManager.getApplication().invokeLater { next() }
             } catch (e: Throwable) {
                 log.warn("play failed", e)
+                ApplicationManager.getApplication().invokeLater {
+                    update(state.copy(
+                        playbackPhase = PlaybackPhase.FAILED,
+                        isBuffering = false
+                    ))
+                }
             }
         }
     }
@@ -364,7 +401,12 @@ internal class MusicPlayerService(private val cs: CoroutineScope) : Disposable {
 
     private inner class EngineListener : AudioEngine.Listener {
         override fun onPositionUpdate(positionMs: Long) {
-            update(state.copy(positionMs = positionMs))
+            recoveryController.onProgress(positionMs)
+            if (state.isBuffering) {
+                update(state.copy(positionMs = positionMs, isBuffering = false))
+            } else {
+                update(state.copy(positionMs = positionMs))
+            }
         }
 
         override fun onCompleted() {
@@ -373,15 +415,13 @@ internal class MusicPlayerService(private val cs: CoroutineScope) : Disposable {
 
         override fun onError(error: Throwable) {
             log.warn("playback engine error", error)
-            update(state.copy(isPlaying = false))
+            update(state.copy(playbackPhase = PlaybackPhase.FAILED))
         }
 
-        override fun onStalled() {
-            log.warn("playback stalled — auto-advancing to next track")
-            ApplicationManager.getApplication().invokeLater {
-                notify("播放卡住,自动切下一首", NotificationType.WARNING)
-                next()
-            }
+        override fun onStall() {
+            log.warn("playback stall — delegating to RecoveryController")
+            update(state.copy(playbackPhase = PlaybackPhase.RECOVERING, isBuffering = true))
+            recoveryController.onStall()
         }
     }
 

@@ -8,6 +8,7 @@ import com.intellij.util.ui.JBFont
 import com.intellij.util.ui.JBUI
 import org.lixidong.musicplugin.service.LyricService
 import org.lixidong.musicplugin.service.MusicPlayerService
+import org.lixidong.musicplugin.service.PlaybackPhase
 import org.lixidong.musicplugin.service.PlaybackState
 import org.lixidong.musicplugin.service.PlaybackStateListener
 import org.lixidong.musicplugin.service.PlaybackTopics
@@ -187,7 +188,11 @@ internal class PlayerView : JBPanel<JBPanel<*>>(), PlaybackStateListener {
             timeLabel.text = "${fmt(state.positionMs)} / ${fmt(state.durationMs)}"
             lyricLabel.text = LyricService.getInstance().currentLineFor(state.positionMs) ?: " "
         }
-        playPauseButton.icon = if (state.isPlaying) MusicIcons.Pause else MusicIcons.Play
+        playPauseButton.icon = when (state.playbackPhase) {
+            PlaybackPhase.PLAYING -> MusicIcons.Pause
+            PlaybackPhase.BUFFERING, PlaybackPhase.RECOVERING -> MusicIcons.Loading
+            else -> MusicIcons.Play
+        }
         if (volumeSlider.value != state.volumePercent) {
             ignoreSliderChange = true
             try { volumeSlider.value = state.volumePercent } finally { ignoreSliderChange = false }

@@ -14,6 +14,7 @@ import org.lixidong.musicplugin.MusicBundle
 import org.lixidong.musicplugin.api.model.Song
 import org.lixidong.musicplugin.service.LyricService
 import org.lixidong.musicplugin.service.MusicPlayerService
+import org.lixidong.musicplugin.service.PlaybackPhase
 import org.lixidong.musicplugin.service.PlaybackState
 import org.lixidong.musicplugin.service.PlaybackStateListener
 import org.lixidong.musicplugin.service.PlaybackTopics
@@ -123,8 +124,15 @@ internal class MusicStatusBarWidget(private val project: Project) : CustomStatus
     }
 
     private fun applyState(state: PlaybackState) {
-        lyricLabel.update(computeText(state), state.isPlaying)
-        playPauseButton.setIcon(if (state.isPlaying) MusicIcons.Pause else MusicIcons.Play)
+        val isBuffering = state.playbackPhase == PlaybackPhase.BUFFERING || state.playbackPhase == PlaybackPhase.RECOVERING
+        lyricLabel.update(computeText(state, isBuffering), state.isPlaying && !isBuffering)
+        playPauseButton.setIcon(
+            when (state.playbackPhase) {
+                PlaybackPhase.PLAYING -> MusicIcons.Pause
+                PlaybackPhase.BUFFERING, PlaybackPhase.RECOVERING -> MusicIcons.Loading
+                else -> MusicIcons.Play
+            }
+        )
         likeButton.setIcon(if (state.isCurrentLiked) MusicIcons.LikeOn else MusicIcons.LikeOff)
         heartModeButton.setIcon(if (state.isHeartMode) MusicIcons.HeartModeOn else MusicIcons.HeartModeOff)
         // 更新歌词区域tooltip（只在歌词标签上，不影响按钮区域）
@@ -132,8 +140,10 @@ internal class MusicStatusBarWidget(private val project: Project) : CustomStatus
         lyricLabel.toolTipText = song?.display ?: ""
     }
 
-    private fun computeText(state: PlaybackState): String {
+    private fun computeText(state: PlaybackState, isBuffering: Boolean = false): String {
         val song = state.currentSong ?: return MusicBundle.message("statusbar.idle")
+        // Show buffering hint when recovery is in progress
+        if (isBuffering) return "缓冲中..."
         // Show song title for the first few seconds of playback before switching to lyrics,
         // so the song info is readable instead of flashing past.
         if (state.positionMs < TITLE_GRACE_MS) return song.display

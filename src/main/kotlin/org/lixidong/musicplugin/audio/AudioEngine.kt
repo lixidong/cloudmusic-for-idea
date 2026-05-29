@@ -20,11 +20,13 @@ internal class AudioEngine {
         fun onCompleted()
         fun onError(error: Throwable)
         /**
-         * The current track stopped making progress and was forcibly aborted.
-         * Implementations should typically advance to the next track. Default
-         * delegates to [onError] for backwards-compat.
+         * 播放卡住, 由 RecoveryController 分级处理:
+         * - 第 1 次: Level 1 (等待)
+         * - 第 2 次: Level 2 (重连当前 URL)
+         * - 第 3 次: Level 3 (重新获取 URL)
+         * - 第 4 次: Level 4 (放弃, RecoveryController 自行切歌)
          */
-        fun onStalled() { onError(java.io.IOException("playback stalled")) }
+        fun onStall()
     }
 
     @Volatile private var line: SourceDataLine? = null
@@ -51,10 +53,10 @@ internal class AudioEngine {
         currentUrl = url
         currentSongId = songId
         seekStartMs = startAtMs.coerceAtLeast(0L)
-        val wd = StallWatchdog(STALL_TIMEOUT_MS) { reason ->
-            log.warn("playback stalled: $reason — aborting current track")
+        val wd = StallWatchdog(STALL_TIMEOUT_MS) {
+            log.warn("playback stalled — RecoveryController handling")
             stopInternal()
-            listener?.onStalled()
+            listener?.onStall()
         }
         watchdog = wd
         wd.start()
@@ -237,7 +239,255 @@ internal class AudioEngine {
 
     fun dispose() = stop()
 
+    fun currentSongId(): Long = currentSongId
+
+    /**
+     * Level 2 recovery: reconnect with the same URL, seek to specified position.
+     */
+    fun reconnectCurrentUrl(seekToMs: Long) {
+        val url = currentUrl ?: return
+        play(url, currentSongId, seekToMs)
+    }
+
+    /**
+     * Play from a local file (downloaded by StreamDownloader).
+     *
+     * 与 play() 的区别：
+     * - 不经过 MediaCache 的网络流
+     * - 直接从本地文件读取，无网络延迟
+     * - 文件必须已经完整下载（由 StreamDownloader 保证）
+     *
+     * @param filePath 本地文件路径（通常是 MediaCache 中的 .mp3 文件）
+     * @param songId 歌曲 ID
+     * @param startAtMs 起始播放位置（毫秒）
+     */
+    @Synchronized
+    fun playFromFile(filePath: java.nio.file.Path, songId: Long = 0L, startAtMs: Long = 0L) {
+        stopInternal()
+        stopRequested = false
+        paused = false
+        currentUrl = null
+        currentSongId = songId
+        seekStartMs = startAtMs.coerceAtLeast(0L)
+
+        val wd = StallWatchdog(STALL_TIMEOUT_MS) {
+            log.warn("playback stalled (playFromFile) — RecoveryController handling")
+            stopInternal()
+            listener?.onStall()
+        }
+        watchdog = wd
+        wd.start()
+
+        val t = Thread({ runPlaybackFromFile(filePath, wd) }, "NeteaseMusic-Playback")
+        t.isDaemon = true
+        playbackThread = t
+        t.start()
+    }
+
+    private fun runPlaybackFromFile(filePath: java.nio.file.Path, wd: StallWatchdog) {
+        var opened: StreamSource.Opened? = null
+        val seekTargetMs = seekStartMs
+        try {
+            val input = java.nio.file.Files.newInputStream(filePath)
+            opened = StreamSource.open(input)
+            rawStream = opened.raw
+            pcmStream = opened.pcm
+            sampleRate = opened.targetFormat.sampleRate
+            wd.progress()
+
+            if (seekTargetMs > 0) {
+                val bytesPerMs = (opened.targetFormat.frameSize * opened.targetFormat.frameRate) / 1000.0
+                val targetBytes = (seekTargetMs * bytesPerMs).toLong()
+                val skipBuf = ByteArray(16 * 1024)
+                var skipped = 0L
+                while (skipped < targetBytes && !stopRequested) {
+                    val want = minOf(skipBuf.size.toLong(), targetBytes - skipped).toInt()
+                    val read = opened.pcm.read(skipBuf, 0, want)
+                    if (read < 0) break
+                    skipped += read
+                    if (read > 0) wd.progress()
+                }
+                if (stopRequested) return
+            }
+
+            val sdl = AudioSystem.getSourceDataLine(opened.targetFormat)
+            sdl.open(opened.targetFormat, 192 * 1024)
+            sdl.start()
+            line = sdl
+            applyVolume()
+            wd.progress()
+
+            val frameSize = opened.targetFormat.frameSize.coerceAtLeast(1)
+            val buf = ByteArray(8 * 1024)
+            var pending = 0
+            var lastEmitMs = 0L
+            while (!stopRequested) {
+                if (paused) {
+                    Thread.sleep(40)
+                    continue
+                }
+                val read = opened.pcm.read(buf, pending, buf.size - pending)
+                if (read < 0) {
+                    if (pending > 0) {
+                        pending = 0
+                    }
+                    break
+                }
+                val total = pending + read
+                val aligned = (total / frameSize) * frameSize
+                if (aligned > 0) {
+                    var off = 0
+                    while (off < aligned && !stopRequested) {
+                        val wrote = sdl.write(buf, off, aligned - off)
+                        off += wrote
+                        if (wrote > 0) wd.progress()
+                    }
+                    val playedMs = (sdl.framePosition * 1000L) / sampleRate.toLong()
+                    val posMs = playedMs + seekTargetMs
+                    if (posMs - lastEmitMs >= 250) {
+                        lastEmitMs = posMs
+                        listener?.onPositionUpdate(posMs)
+                    }
+                }
+                val leftover = total - aligned
+                if (leftover > 0) {
+                    System.arraycopy(buf, aligned, buf, 0, leftover)
+                }
+                pending = leftover
+            }
+            if (!stopRequested) {
+                try { sdl.drain() } catch (e: Throwable) { log.debug("sdl.drain", e) }
+                listener?.onCompleted()
+            }
+        } catch (_: InterruptedException) {
+        } catch (e: Throwable) {
+            if (!stopRequested) listener?.onError(e)
+        } finally {
+            try { line?.close() } catch (e: Throwable) { log.debug("finally line.close", e) }
+            try { opened?.pcm?.close() } catch (e: Throwable) { log.debug("finally pcm.close", e) }
+            try { opened?.raw?.close() } catch (e: Throwable) { log.debug("finally raw.close", e) }
+            line = null
+            pcmStream = null
+            rawStream = null
+        }
+    }
+
+    /**
+     * 从 InputStream 播放（预缓冲场景）
+     * 用于边下载边播放：PrebufferManager 下载前 N 字节后返回 BlockingFileInputStream，
+     * 播放线程通过该流读取数据，当读取到当前文件末尾时会阻塞等待下载线程写入更多数据。
+     */
+    @Synchronized
+    fun playFromStream(songId: Long, inputStream: java.io.InputStream, startAtMs: Long = 0L) {
+        stopInternal()
+        stopRequested = false
+        paused = false
+        currentUrl = null
+        currentSongId = songId
+        seekStartMs = startAtMs.coerceAtLeast(0L)
+
+        val wd = StallWatchdog(STALL_TIMEOUT_MS) {
+            log.warn("playback stalled (playFromStream) — RecoveryController handling")
+            stopInternal()
+            listener?.onStall()
+        }
+        watchdog = wd
+        wd.start()
+
+        val t = Thread({ runPlaybackFromStream(inputStream, wd) }, "NeteaseMusic-Playback-Stream")
+        t.isDaemon = true
+        playbackThread = t
+        t.start()
+    }
+
+    private fun runPlaybackFromStream(inputStream: java.io.InputStream, wd: StallWatchdog) {
+        var opened: StreamSource.Opened? = null
+        val seekTargetMs = seekStartMs
+        try {
+            opened = StreamSource.open(inputStream)
+            rawStream = opened.raw
+            pcmStream = opened.pcm
+            sampleRate = opened.targetFormat.sampleRate
+            wd.progress()
+
+            if (seekTargetMs > 0) {
+                val bytesPerMs = (opened.targetFormat.frameSize * opened.targetFormat.frameRate) / 1000.0
+                val targetBytes = (seekTargetMs * bytesPerMs).toLong()
+                val skipBuf = ByteArray(16 * 1024)
+                var skipped = 0L
+                while (skipped < targetBytes && !stopRequested) {
+                    val want = minOf(skipBuf.size.toLong(), targetBytes - skipped).toInt()
+                    val read = opened.pcm.read(skipBuf, 0, want)
+                    if (read < 0) break
+                    skipped += read
+                    if (read > 0) wd.progress()
+                }
+                if (stopRequested) return
+            }
+
+            val sdl = AudioSystem.getSourceDataLine(opened.targetFormat)
+            sdl.open(opened.targetFormat, 192 * 1024)
+            sdl.start()
+            line = sdl
+            applyVolume()
+            wd.progress()
+
+            val frameSize = opened.targetFormat.frameSize.coerceAtLeast(1)
+            val buf = ByteArray(8 * 1024)
+            var pending = 0
+            var lastEmitMs = 0L
+            while (!stopRequested) {
+                if (paused) {
+                    Thread.sleep(40)
+                    continue
+                }
+                val read = opened.pcm.read(buf, pending, buf.size - pending)
+                if (read < 0) {
+                    if (pending > 0) {
+                        pending = 0
+                    }
+                    break
+                }
+                val total = pending + read
+                val aligned = (total / frameSize) * frameSize
+                if (aligned > 0) {
+                    var off = 0
+                    while (off < aligned && !stopRequested) {
+                        val wrote = sdl.write(buf, off, aligned - off)
+                        off += wrote
+                        if (wrote > 0) wd.progress()
+                    }
+                    val playedMs = (sdl.framePosition * 1000L) / sampleRate.toLong()
+                    val posMs = playedMs + seekTargetMs
+                    if (posMs - lastEmitMs >= 250) {
+                        lastEmitMs = posMs
+                        listener?.onPositionUpdate(posMs)
+                    }
+                }
+                val leftover = total - aligned
+                if (leftover > 0) {
+                    System.arraycopy(buf, aligned, buf, 0, leftover)
+                }
+                pending = leftover
+            }
+            if (!stopRequested) {
+                try { sdl.drain() } catch (e: Throwable) { log.debug("sdl.drain", e) }
+                listener?.onCompleted()
+            }
+        } catch (_: InterruptedException) {
+        } catch (e: Throwable) {
+            if (!stopRequested) listener?.onError(e)
+        } finally {
+            try { line?.close() } catch (e: Throwable) { log.debug("finally line.close", e) }
+            try { opened?.pcm?.close() } catch (e: Throwable) { log.debug("finally pcm.close", e) }
+            try { opened?.raw?.close() } catch (e: Throwable) { log.debug("finally raw.close", e) }
+            line = null
+            pcmStream = null
+            rawStream = null
+        }
+    }
+
     companion object {
-        private const val STALL_TIMEOUT_MS = 12_000L
+        private const val STALL_TIMEOUT_MS = 15_000L
     }
 }

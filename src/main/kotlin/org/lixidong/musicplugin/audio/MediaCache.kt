@@ -61,14 +61,12 @@ internal class MediaCache : Disposable {
             return Files.newInputStream(final)
         }
 
-        val tmp = rootDir.resolve("$songId.mp3.tmp")
+        val partial = rootDir.resolve("$songId.mp3.partial")
         val source = downloadOnly(url)
         val out: OutputStream = try {
-            // Buffered so the tee-write doesn't add a syscall per pcm.read(),
-            // which on slow filesystems would back-pressure the playback thread.
             BufferedOutputStream(
                 Files.newOutputStream(
-                    tmp,
+                    partial,
                     StandardOpenOption.CREATE,
                     StandardOpenOption.TRUNCATE_EXISTING,
                     StandardOpenOption.WRITE,
@@ -83,14 +81,114 @@ internal class MediaCache : Disposable {
         return TeeInputStream(source, out) { fullyRead ->
             if (fullyRead) {
                 val ok = runCatching {
-                    Files.move(tmp, final, StandardCopyOption.REPLACE_EXISTING)
+                    Files.move(partial, final, StandardCopyOption.REPLACE_EXISTING)
                 }.onFailure { log.debug("rename cache file", it) }.isSuccess
-                if (ok) prune()
-            } else {
-                runCatching { Files.deleteIfExists(tmp) }
-                    .onFailure { log.debug("rm tmp", it) }
+                if (ok) {
+                    runCatching { Files.deleteIfExists(rootDir.resolve("$songId.mp3.meta")) }
+                    prune()
+                }
+            }
+            // 不完全读取时保留 .partial 文件，供后续断点续传使用
+        }
+    }
+
+    /**
+     * 检查是否有该歌曲的完整缓存
+     */
+    fun hasComplete(songId: Long): Boolean {
+        if (songId <= 0L) return false
+        return Files.exists(rootDir.resolve("$songId.mp3"))
+    }
+
+    /**
+     * 获取完整缓存文件路径，不存在返回 null
+     */
+    fun getCompleteFile(songId: Long): Path? {
+        if (songId <= 0L) return null
+        val file = rootDir.resolve("$songId.mp3")
+        return if (Files.exists(file)) {
+            runCatching { Files.setLastModifiedTime(file, FileTime.from(Instant.now())) }
+            file
+        } else null
+    }
+
+    /**
+     * 将 partial 文件标记为完整（重命名为 .mp3）
+     */
+    fun markComplete(songId: Long) {
+        if (songId <= 0L) return
+        val partial = rootDir.resolve("$songId.mp3.partial")
+        val final = rootDir.resolve("$songId.mp3")
+        if (Files.exists(partial)) {
+            val ok = runCatching {
+                Files.move(partial, final, StandardCopyOption.REPLACE_EXISTING)
+            }.onFailure { log.debug("markComplete: rename failed", it) }.isSuccess
+            if (ok) {
+                runCatching { Files.deleteIfExists(rootDir.resolve("$songId.mp3.meta")) }
+                prune()
             }
         }
+    }
+
+    /**
+     * 获取或创建 partial 文件路径（用于断点续传）
+     */
+    fun getOrCreatePartialFile(songId: Long): Path {
+        if (songId <= 0L) throw IllegalArgumentException("songId must be positive")
+        return rootDir.resolve("$songId.mp3.partial")
+    }
+
+    /**
+     * 获取 partial 文件路径（用于检查断点续传）
+     */
+    fun getPartialFile(songId: Long): Path? {
+        if (songId <= 0L) return null
+        val partial = rootDir.resolve("$songId.mp3.partial")
+        return if (Files.exists(partial)) partial else null
+    }
+
+    /**
+     * 以追加模式打开 partial 文件输出流
+     */
+    fun openPartialForAppend(songId: Long): OutputStream? {
+        if (songId <= 0L) return null
+        val partial = rootDir.resolve("$songId.mp3.partial")
+        if (!Files.exists(partial)) return null
+        return try {
+            BufferedOutputStream(
+                Files.newOutputStream(
+                    partial,
+                    StandardOpenOption.APPEND,
+                ),
+                64 * 1024
+            )
+        } catch (e: Throwable) {
+            log.debug("openPartialForAppend failed for $songId", e)
+            null
+        }
+    }
+
+    /**
+     * 从 meta 文件读取已缓存的总字节数
+     */
+    fun getTotalBytes(songId: Long): Long {
+        if (songId <= 0L) return 0L
+        val meta = rootDir.resolve("$songId.mp3.meta")
+        if (!Files.exists(meta)) return 0L
+        return runCatching {
+            Files.readString(meta).toLongOrNull() ?: 0L
+        }.getOrElse { 0L }
+    }
+
+    /**
+     * 写入 meta 文件记录总字节数
+     */
+    fun setTotalBytes(songId: Long, totalBytes: Long) {
+        if (songId <= 0L) return
+        val meta = rootDir.resolve("$songId.mp3.meta")
+        runCatching {
+            Files.writeString(meta, totalBytes.toString(), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)
+        }.onFailure { log.debug("setTotalBytes failed for $songId", it) }
     }
 
     private fun downloadOnly(url: String): InputStream {
